@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEOTRIS — 네온 블록 퍼즐</title>
+<meta name="theme-color" content="#0f1220">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+  :root { --bg:#0f1220; --panel:#1a1f35; --line:#2a3152; --text:#e8ecff; --dim:#8a93c0; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    user-select: none; -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none; touch-action: manipulation;
+  }
+  #app { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 16px; }
+  #brand { display: flex; align-items: center; gap: 11px; align-self: flex-start; padding-left: 2px; }
+  #brand img { border-radius: 9px; display: block; }
+  #brand h1 {
+    font-size: 21px; font-weight: 900; letter-spacing: .16em; line-height: 1;
+    background: linear-gradient(90deg, #4dd8e6, #b06ee6);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 12px rgba(77,216,230,.45));
+  }
+  #brand span { display: block; margin-top: 4px; font-size: 9px; color: var(--dim); letter-spacing: .32em; }
+  #wrap { display: flex; gap: 20px; align-items: flex-start; }
+  #stage { position: relative; }
+  canvas#board {
+    background: #0a0d1a; border: 2px solid var(--line); border-radius: 6px;
+    display: block; max-height: 80vh; max-width: 94vw; width: auto; height: auto;
+    box-shadow: 0 0 44px rgba(77,216,230,.09), 0 0 90px rgba(176,110,230,.07);
+    touch-action: none;
+  }
+  #btn-pause {
+    position: absolute; top: 8px; right: 8px; display: none;
+    font: inherit; font-size: 15px; color: var(--text);
+    background: rgba(26,31,53,.8); border: 1px solid var(--line); border-radius: 8px;
+    width: 38px; height: 38px; cursor: pointer;
+  }
+  aside { width: 170px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; }
+  .card h2 { font-size: 12px; color: var(--dim); font-weight: 600; margin-bottom: 8px; letter-spacing: .1em; }
+  .num { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 8px; }
+  #stats small { color: var(--dim); font-size: 11px; display: block; margin-bottom: 2px; }
+  canvas#next { display: block; margin: 0 auto; }
+  .keys { font-size: 12px; color: var(--dim); line-height: 1.9; }
+  .keys b { color: var(--text); background:#252c4d; border:1px solid var(--line); border-radius:4px;
+            padding: 1px 6px; font-weight: 600; display:inline-block; min-width: 24px; text-align:center; }
+  #overlay {
+    position: absolute; inset: 0; background: rgba(10,13,26,.82); border-radius: 6px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    text-align: center; backdrop-filter: blur(2px); padding: 16px;
+  }
+  #overlay p { max-width: 100%; }
+  #overlay.hide { display: none; }
+  #overlay h1 {
+    font-size: 32px; font-weight: 900; letter-spacing: .1em;
+    background: linear-gradient(90deg, #4dd8e6, #b06ee6);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    filter: drop-shadow(0 0 16px rgba(77,216,230,.5));
+  }
+  #ov-log { font-size: 12px; color: var(--dim); line-height: 1.9; }
+  #ov-log b { color: var(--text); }
+  #ov-log:empty { display: none; }
+  #overlay p { color: var(--dim); font-size: 14px; }
+  #overlay button {
+    font: inherit; font-weight: 700; color: #0a0d1a; background: #4dd8e6;
+    border: 0; border-radius: 8px; padding: 10px 26px; cursor: pointer; font-size: 16px;
+  }
+  #overlay button:hover { filter: brightness(1.1); }
+  /* ── 모바일: 세로 배치, 정보 패널은 위로, 키보드 안내 숨김 ── */
+  @media (max-width: 720px) {
+    #app { padding: 10px; gap: 8px; min-height: 100dvh; justify-content: flex-start; }
+    #brand { align-self: center; padding: 0; }
+    #wrap { flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+    aside { order: -1; width: 100%; max-width: 360px; flex-direction: row; gap: 8px; }
+    aside .card { flex: 1; padding: 8px 10px; }
+    aside .card h2 { margin-bottom: 4px; }
+    canvas#next { width: 56px; height: 56px; }
+    .num { font-size: 15px; }
+    #stats { gap: 4px 10px; }
+    canvas#board { max-height: 64vh; }
+    /* 좁은 화면에선 안내 카드를 빼고 시작 화면 문구로 대체 */
+    .keys { display: none; }
+    #btn-pause { display: block; }
+  }
+  @media (hover: none) { .keys { display: none; } #btn-pause { display: block; } }
+</style>
+</head>
+<body>
+<div id="app">
+<header id="brand">
+  <img src="icon-192.png" alt="NEOTRIS 로고" width="36" height="36">
+  <div><h1>NEOTRIS</h1><span>NEON BLOCK PUZZLE</span></div>
+</header>
+<div id="wrap">
+  <div id="stage">
+    <canvas id="board" width="300" height="600"></canvas>
+    <button id="btn-pause" aria-label="일시정지">⏸</button>
+    <div id="overlay">
+      <h1 id="ov-title">NEOTRIS</h1>
+      <p id="ov-msg">방향키로 조작하는 네온 블록 퍼즐</p>
+      <div id="ov-log"></div>
+      <button id="ov-btn">시작 (Enter)</button>
+    </div>
+  </div>
+  <aside>
+    <div class="card"><h2>다음 블록</h2><canvas id="next" width="120" height="120"></canvas></div>
+    <div class="card"><h2>기록</h2>
+      <div id="stats">
+        <div><small>점수</small><div class="num" id="score">0</div></div>
+        <div><small>최고</small><div class="num" id="high">0</div></div>
+        <div><small>줄</small><div class="num" id="lines">0</div></div>
+        <div><small>레벨</small><div class="num" id="level">1</div></div>
+      </div>
+    </div>
+    <div class="card keys">
+      <b>←</b> <b>→</b> 이동 (꾹 누르면 연속)<br>
+      <b>↑</b> <b>X</b> 회전 (시계)<br>
+      <b>Z</b> 회전 (반시계)<br>
+      <b>↓</b> 살살 내리기 (꾹 누르기)<br>
+      <b>Space</b> 한번에 떨어뜨리기<br>
+      <b>P</b> <b>Esc</b> 일시정지 · <b>R</b> 새 게임
+    </div>
+  </aside>
+</div>
+</div>
+
+<script>
+'use strict';
+const COLS = 10, ROWS = 20, CELL = 30;
+const SHAPES = {
+  I: [[0,0,0,0],[1,1,1,1],[0,0,0,0],[0,0,0,0]],
+  O: [[1,1],[1,1]],
+  T: [[0,1,0],[1,1,1],[0,0,0]],
+  S: [[0,1,1],[1,1,0],[0,0,0]],
+  Z: [[1,1,0],[0,1,1],[0,0,0]],
+  J: [[1,0,0],[1,1,1],[0,0,0]],
+  L: [[0,0,1],[1,1,1],[0,0,0]],
+};
+const COLORS = { I:'#4dd8e6', O:'#f2d94e', T:'#b06ee6', S:'#5fe08a', Z:'#e66e7a', J:'#6e8ee6', L:'#e8a04d' };
+
+const boardCv = document.getElementById('board'), bctx = boardCv.getContext('2d');
+const nextCv = document.getElementById('next'), nctx = nextCv.getContext('2d');
+const $ = id => document.getElementById(id);
+
+// 로컬 기록 저장 (최고 점수 + 최근 플레이 로그)
+const STORE_KEY = 'neotris_v1';
+function loadData() { try { return Object.assign({ high: 0, log: [] }, JSON.parse(localStorage.getItem(STORE_KEY))); } catch { return { high: 0, log: [] }; } }
+// 저장 실패(시크릿 모드·저장 차단)해도 게임은 계속되어야 함
+function saveData() { try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch {} }
+let data = loadData();
+
+let board, player, nextType, bag = [];
+let score = 0, lines = 0, level = 1, dropTimer = 0, dropInterval = 850, playing = false, paused = false, over = false;
+let rafId = null, lastTime = 0;
+
+function emptyBoard() { return Array.from({length: ROWS}, () => Array(COLS).fill('')); }
+
+// 7-bag 랜더마이저: 7종을 한 묶음씩 섞어 뽑아 같은 블록 가뭄 방지
+function nextFromBag() {
+  if (!bag.length) {
+    bag = Object.keys(SHAPES);
+    for (let i = bag.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [bag[i], bag[j]] = [bag[j], bag[i]];
+    }
+  }
+  return bag.pop();
+}
+
+function rotCW(m)  { return m[0].map((_, x) => m.map(r => r[x]).reverse()); }
+function rotCCW(m) { return m[0].map((_, x) => m.map(r => r[m[0].length - 1 - x])); }
+
+function collide(matrix, pos) {
+  for (let y = 0; y < matrix.length; y++)
+    for (let x = 0; x < matrix[y].length; x++) {
+      if (!matrix[y][x]) continue;
+      const bx = pos.x + x, by = pos.y + y;
+      if (bx < 0 || bx >= COLS || by >= ROWS) return true;
+      if (by >= 0 && board[by][bx]) return true;
+    }
+  return false;
+}
+
+function spawn() {
+  const type = nextType || nextFromBag();
+  nextType = nextFromBag();
+  const matrix = SHAPES[type].map(r => r.slice());
+  player = { type, matrix, x: Math.floor((COLS - matrix[0].length) / 2), y: -1 };
+  if (collide(player.matrix, player)) return gameOver();   // 스폰 자리가 막히면 즉시 게임오버 (블록아웃)
+  drawNext();
+}
+
+function tryRotate(dir) {
+  const m = dir > 0 ? rotCW(player.matrix) : rotCCW(player.matrix);
+  for (const dx of [0, -1, 1, -2, 2]) {          // 간단 월킥
+    const pos = { x: player.x + dx, y: player.y };
+    if (!collide(m, pos)) { player.matrix = m; player.x = pos.x; return; }
+  }
+}
+
+function move(dx) {
+  const pos = { x: player.x + dx, y: player.y };
+  if (collide(player.matrix, pos)) return false;
+  player.x = pos.x;
+  return true;
+}
+
+function softDrop() {
+  player.y++;
+  if (collide(player.matrix, player)) { player.y--; lock(); }
+  else score += 1;
+  dropTimer = 0;
+  updateHud();
+}
+
+function hardDrop() {
+  let dist = 0;
+  while (!collide(player.matrix, { x: player.x, y: player.y + 1 })) { player.y++; dist++; }
+  score += dist * 2;
+  lock();
+  updateHud();
+}
+
+function ghostY() {
+  let y = player.y;
+  while (!collide(player.matrix, { x: player.x, y: y + 1 })) y++;
+  return y;
+}
+
+function lock() {
+  player.matrix.forEach((row, y) => row.forEach((v, x) => {
+    if (v && player.y + y >= 0) board[player.y + y][player.x + x] = player.type;
+  }));
+  clearLines();
+  spawn();
+  dropTimer = 0;
+}
+
+function clearLines() {
+  let n = 0;
+  for (let y = ROWS - 1; y >= 0; y--) {
+    if (board[y].every(c => c)) {
+      board.splice(y, 1);
+      board.unshift(Array(COLS).fill(''));
+      n++; y++;
+    }
+  }
+  if (!n) return;
+  lines += n;
+  score += [0, 100, 300, 500, 800][n] * level;
+  level = Math.floor(lines / 10) + 1;
+  dropInterval = Math.max(70, 850 - (level - 1) * 75);
+  updateHud();
+}
+
+function gameOver() {
+  over = true; playing = false;
+  const isHigh = score > 0 && score > data.high;
+  if (isHigh) data.high = score;
+  data.log.unshift({ s: score, l: lines, v: level, d: Date.now() });
+  data.log = data.log.slice(0, 10);
+  saveData();
+  renderLog();
+  updateHud();
+  showOverlay(isHigh ? '🏆 신기록!' : '게임 오버', `점수 ${score.toLocaleString()} · ${lines}줄 · 레벨 ${level}`, '다시 시작 (Enter)', true);
+}
+
+function renderLog() {
+  const pad = n => String(n).padStart(2, '0');
+  $('ov-log').innerHTML = data.log.slice(0, 5).map(r => {
+    const t = new Date(r.d);
+    return `${pad(t.getMonth() + 1)}.${pad(t.getDate())} ${pad(t.getHours())}:${pad(t.getMinutes())} · <b>${r.s.toLocaleString()}</b>점 · ${r.l}줄`;
+  }).join('<br>');
+}
+
+function drawCell(ctx, x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, size, size);
+  ctx.fillStyle = 'rgba(255,255,255,.25)';
+  ctx.fillRect(x, y, size, 3);                    // 윗면 하이라이트
+  ctx.fillStyle = 'rgba(0,0,0,.25)';
+  ctx.fillRect(x, y + size - 3, size, 3);         // 아랫면 그림자
+  ctx.strokeStyle = 'rgba(0,0,0,.35)';
+  ctx.strokeRect(x + .5, y + .5, size - 1, size - 1);
+}
+
+function draw() {
+  bctx.clearRect(0, 0, boardCv.width, boardCv.height);
+  bctx.strokeStyle = 'rgba(255,255,255,.05)';
+  for (let x = 1; x < COLS; x++) { bctx.beginPath(); bctx.moveTo(x * CELL + .5, 0); bctx.lineTo(x * CELL + .5, ROWS * CELL); bctx.stroke(); }
+  for (let y = 1; y < ROWS; y++) { bctx.beginPath(); bctx.moveTo(0, y * CELL + .5); bctx.lineTo(COLS * CELL, y * CELL + .5); bctx.stroke(); }
+
+  board.forEach((row, y) => row.forEach((t, x) => { if (t) drawCell(bctx, x * CELL, y * CELL, CELL, COLORS[t]); }));
+
+  if (player && playing) {
+    const gy = ghostY();                          // 고스트(착지 예상 위치)
+    bctx.globalAlpha = .22;
+    player.matrix.forEach((row, y) => row.forEach((v, x) => {
+      if (v && gy + y >= 0) drawCell(bctx, (player.x + x) * CELL, (gy + y) * CELL, CELL, COLORS[player.type]);
+    }));
+    bctx.globalAlpha = 1;
+    player.matrix.forEach((row, y) => row.forEach((v, x) => {
+      if (v && player.y + y >= 0) drawCell(bctx, (player.x + x) * CELL, (player.y + y) * CELL, CELL, COLORS[player.type]);
+    }));
+  }
+}
+
+function drawNext() {
+  nctx.clearRect(0, 0, nextCv.width, nextCv.height);
+  const m = SHAPES[nextType];
+  const size = 24;
+  const w = m[0].length, h = m.filter(r => r.some(v => v)).length;
+  const ox = (nextCv.width - w * size) / 2, oy = (nextCv.height - h * size) / 2;
+  m.forEach((row, y) => row.forEach((v, x) => { if (v) drawCell(nctx, ox + x * size, oy + y * size, size, COLORS[nextType]); }));
+}
+
+function updateHud() {
+  $('score').textContent = score.toLocaleString();
+  $('lines').textContent = lines;
+  $('level').textContent = level;
+  $('high').textContent = Math.max(data.high, score).toLocaleString();
+}
+
+function showOverlay(title, msg, btn, withLog = false) {
+  $('ov-title').textContent = title;
+  $('ov-msg').textContent = msg;
+  $('ov-btn').textContent = btn;
+  $('ov-log').style.display = withLog ? '' : 'none';
+  $('overlay').classList.remove('hide');
+}
+
+function startGame() {
+  board = emptyBoard(); bag = []; nextType = null;
+  score = 0; lines = 0; level = 1;
+  dropInterval = 850; dropTimer = 0; lastTime = 0;
+  over = false; paused = false; playing = true;
+  clearHeld();
+  $('overlay').classList.add('hide');
+  spawn(); updateHud();
+  if (rafId) cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(loop);
+}
+
+function togglePause() {
+  if (!playing && !paused) return;
+  paused = !paused;
+  if (paused) { playing = false; showOverlay('일시정지', '', '계속하기 (P)'); }
+  else { playing = true; lastTime = 0; $('overlay').classList.add('hide'); rafId = requestAnimationFrame(loop); }
+}
+
+// ── 입력 시스템: OS 키 반복 대신 자체 DAS(Delayed Auto Shift) ──
+// 첫 입력은 즉시, 꾹 누르면 DAS(170ms) 후 ARR(40ms) 간격으로 연속 이동.
+// 좌우 동시 입력 시 나중에 누른 방향이 우선, 떼면 남은 방향으로 복귀.
+const DAS = 170, ARR = 40, SOFT_ARR = 45;
+const held = { left: false, right: false, down: false };
+let moveDir = 0, dasTimer = 0, arrTimer = 0, softTimer = 0;
+
+function pressDir(d) { moveDir = d; dasTimer = 0; arrTimer = 0; move(d); }
+function clearHeld() { held.left = held.right = held.down = false; moveDir = 0; }
+
+function handleInput(dt) {
+  if (moveDir && (held.left || held.right)) {
+    dasTimer += dt;
+    if (dasTimer > DAS) {
+      arrTimer += dt;
+      while (arrTimer > ARR) { move(moveDir); arrTimer -= ARR; }
+    }
+  }
+  if (held.down) {
+    softTimer += dt;
+    while (softTimer > SOFT_ARR && playing) { softDrop(); softTimer -= SOFT_ARR; }
+  }
+}
+
+function loop(time) {
+  if (!playing) return;
+  if (!lastTime) lastTime = time;
+  const dt = time - lastTime;
+  lastTime = time;
+  handleInput(dt);
+  dropTimer += dt;
+  if (dropTimer > dropInterval) {
+    player.y++;
+    if (collide(player.matrix, player)) { player.y--; lock(); }
+    dropTimer = 0;
+  }
+  draw();
+  rafId = requestAnimationFrame(loop);
+}
+
+document.addEventListener('keydown', e => {
+  if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' '].includes(e.key)) e.preventDefault();
+  if (e.repeat) return;                       // OS 자동반복 무시 — DAS가 대신 처리
+  const k = e.key.toLowerCase();
+  if (k === 'enter' && !playing && !paused) return startGame();
+  if (k === 'r') return startGame();
+  if (k === 'p' || k === 'escape') return togglePause();
+  if (!playing) return;
+  switch (e.key) {
+    case 'ArrowLeft':  held.left = true;  pressDir(-1); break;
+    case 'ArrowRight': held.right = true; pressDir(1); break;
+    case 'ArrowDown':  held.down = true;  softTimer = 0; softDrop(); break;
+    case 'ArrowUp':    tryRotate(1); break;
+    case ' ':          hardDrop(); break;
+    default:
+      if (k === 'x') tryRotate(1);
+      else if (k === 'z') tryRotate(-1);
+  }
+  draw();
+});
+
+document.addEventListener('keyup', e => {
+  switch (e.key) {
+    case 'ArrowLeft':  held.left = false;  if (held.right) pressDir(1); else if (moveDir === -1) moveDir = 0; break;
+    case 'ArrowRight': held.right = false; if (held.left) pressDir(-1); else if (moveDir === 1) moveDir = 0; break;
+    case 'ArrowDown':  held.down = false; break;
+  }
+});
+
+// ── 모바일 터치 제스처 ──
+// 탭 오른쪽 ⅔ = 시계 회전, 왼쪽 ⅓ = 반시계 회전.
+// 좌우 드래그 = 손가락 따라 칸 단위 이동, 아래 드래그 = 소프트드롭, 빠른 아래 플릭 = 하드드롭.
+const cellPx = () => boardCv.getBoundingClientRect().width / COLS;
+let g = null;
+
+boardCv.addEventListener('pointerdown', e => {
+  if (!playing) return;
+  try { boardCv.setPointerCapture(e.pointerId); } catch {}   // 브라우저별 예외 방어
+  g = { x0: e.clientX, y0: e.clientY, t0: performance.now(),
+        moved: 0, dropped: 0, axis: null, did: false,
+        lastY: e.clientY, lastT: performance.now(), vy: 0 };
+  e.preventDefault();
+});
+
+boardCv.addEventListener('pointermove', e => {
+  if (!g || !playing) return;
+  const px = cellPx();
+  const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
+  const now = performance.now();
+  g.vy = (e.clientY - g.lastY) / Math.max(1, now - g.lastT);   // 마지막 구간 속도 (떼는 순간 기준 플릭 판정)
+  g.lastY = e.clientY; g.lastT = now;
+  if (!g.axis && (Math.abs(dx) > px * .6 || Math.abs(dy) > px * .6))
+    g.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+  if (g.axis === 'x') {
+    const cells = Math.round(dx / px);
+    while (g.moved < cells) { if (!move(1)) break; g.moved++; g.did = true; }
+    while (g.moved > cells) { if (!move(-1)) break; g.moved--; g.did = true; }
+  } else if (g.axis === 'y' && dy > 0) {
+    const cells = Math.round(dy / px);
+    const p = player;                              // 블록이 고정되면 드래그 중단 (새 블록 오폭 방지)
+    while (g.dropped < cells && playing && player === p) { softDrop(); g.dropped++; g.did = true; }
+  }
+  draw();
+});
+
+boardCv.addEventListener('pointerup', e => {
+  if (!g) return;
+  const dt = performance.now() - g.t0;
+  const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
+  const px = cellPx();
+  if (playing) {
+    if (g.axis === 'y' && g.vy > 0.9 && dy > px * 1.5) hardDrop();
+    else if (!g.did && dt < 260 && Math.hypot(dx, dy) < px * .5) {
+      const rect = boardCv.getBoundingClientRect();
+      tryRotate((e.clientX - rect.left) < rect.width / 3 ? -1 : 1);
+    }
+    draw();
+  }
+  g = null;
+});
+boardCv.addEventListener('pointercancel', () => { g = null; });
+$('btn-pause').addEventListener('click', togglePause);
+
+$('ov-btn').addEventListener('click', () => (paused ? togglePause() : startGame()));
+window.addEventListener('blur', () => { clearHeld(); if (playing) togglePause(); });
+
+board = emptyBoard();
+draw();
+updateHud();
+renderLog();
+// 조작 안내: 터치 기기는 제스처, 좁은 창은 키 요약 (우측 안내 카드가 숨겨지므로)
+if (matchMedia('(hover: none)').matches)
+  $('ov-msg').textContent = '탭 회전 (왼쪽 탭은 반대로) · 좌우 드래그 이동 · 아래로 쓸면 드롭';
+else if (matchMedia('(max-width: 720px)').matches)
+  $('ov-msg').textContent = '← → 이동 · ↑ 회전 · ↓ 내리기 · Space 드롭 · P 일시정지';
+if ('serviceWorker' in navigator && location.protocol !== 'file:')
+  navigator.serviceWorker.register('sw.js').catch(() => {});
+window.__t = { get player(){return player}, get board(){return board}, get state(){return {score, lines, level, playing, over}}, get gesture(){return g} };
+
+// 자가 점검: 회전·충돌 로직이 깨지면 콘솔에 에러
+console.assert(JSON.stringify(rotCW([[1,0],[0,0]])) === '[[0,1],[0,0]]', '시계 회전 오류');
+console.assert(JSON.stringify(rotCCW(rotCW(SHAPES.T))) === JSON.stringify(SHAPES.T), '역회전 오류');
+console.assert(collide(SHAPES.O, {x:-1, y:0}) === true, '왼쪽 벽 충돌 감지 실패');
+console.assert(collide(SHAPES.O, {x:0, y:ROWS-1}) === true, '바닥 충돌 감지 실패');
+console.assert(collide(SHAPES.O, {x:4, y:5}) === false, '빈 공간 오탐');
+</script>
+</body>
+</html>
