@@ -190,7 +190,7 @@
 
 <script>
 'use strict';
-const APP_VER = 'v3.0 · 2026.08.12';   // 배포 확인용 — 업데이트 때마다 올린다
+const APP_VER = 'v3.1 · 2026.08.12';   // 배포 확인용 — 업데이트 때마다 올린다
 const COLS = 10, ROWS = 20;
 let CELL = 30;                                    // 화면 크기에 맞춰 매번 다시 계산
 const SHAPES = {
@@ -718,6 +718,30 @@ else if (matchMedia('(max-width: 720px)').matches)
   $('ov-msg').textContent = '← → 이동 · ↑ 회전 · ↓ 내리기 · Space 드롭 · P 일시정지';
 if ('serviceWorker' in navigator && location.protocol !== 'file:')
   navigator.serviceWorker.register('sw.js').catch(() => {});
+
+// ── 자동 업데이트 감시 ──
+// 홈 화면 앱은 다시 열어도 페이지를 새로 안 불러오는 경우가 많다(잠자던 화면 복원).
+// 앱이 보일 때마다 서버의 버전을 캐시 우회로 확인해, 다르면 스스로 새로고침한다.
+let verCheckAt = 0;
+async function checkFresh() {
+  if (document.hidden || location.protocol === 'file:') return;
+  const now = Date.now();
+  if (now - verCheckAt < 30000) return;                       // 30초에 한 번만
+  verCheckAt = now;
+  try {
+    if ('serviceWorker' in navigator)
+      navigator.serviceWorker.getRegistration().then(r => r && r.update()).catch(() => {});
+    const res = await fetch(location.pathname + '?ver=' + now, { cache: 'no-store' });
+    const m = (await res.text()).match(/APP_VER = '([^']+)'/);
+    if (!m || m[1] === APP_VER || playing) return;
+    if (sessionStorage.getItem('reloaded_for') === m[1]) return;   // 새로고침 무한루프 방지
+    try { sessionStorage.setItem('reloaded_for', m[1]); } catch {}
+    location.replace(location.pathname + '?u=' + now);        // 캐시를 뚫는 주소로 다시 로드
+  } catch {}
+}
+document.addEventListener('visibilitychange', checkFresh);
+window.addEventListener('pageshow', checkFresh);              // iOS 뒤로가기 캐시 복원 대응
+checkFresh();
 window.__t = { get player(){return player}, get board(){return board}, get gesture(){return g},
                get state(){return {score, lines, level, playing, over, sound: data.sound, cell: CELL, lockTimer}} };
 

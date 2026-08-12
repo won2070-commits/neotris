@@ -1,5 +1,5 @@
 // NEOTRIS 오프라인 캐시 (cache-first)
-const CACHE = 'neotris-v2';   // 버전을 올리면 옛 캐시가 activate 때 전부 삭제됨
+const CACHE = 'neotris-v3';   // 버전을 올리면 옛 캐시가 activate 때 전부 삭제됨
 const ASSETS = ['./', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -15,8 +15,9 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const put = res => { const copy = res.clone(); caches.open(CACHE).then(c => c.put(e.request, copy)); return res; };
   if (e.request.mode === 'navigate') {
-    // HTML은 network-first: 수정사항이 바로 반영되고, 오프라인일 때만 캐시 사용
-    e.respondWith(fetch(e.request).then(put).catch(() => caches.match(e.request)));
+    // HTML은 network-first + no-cache: 브라우저 HTTP 캐시(10분)를 건너뛰고 서버에 재확인.
+    // 오프라인일 때만 캐시 사용.
+    e.respondWith(fetch(e.request, { cache: 'no-cache' }).then(put).catch(() => caches.match(e.request)));
   } else {
     e.respondWith(caches.match(e.request).then(r => r || fetch(e.request).then(put)));
   }
