@@ -232,6 +232,30 @@ function buzz(kind) {
 
 // ── 소리: 오디오 파일 없이 WebAudio로 합성 (볼륨은 설정 슬라이더 반영) ──
 let actx = null;
+
+// 아이폰은 무음 스위치가 켜져 있으면 WebAudio가 통째로 묵음이 된다.
+// 무음 오디오 태그를 한 번 재생해 오디오 세션을 '미디어 재생' 모드로 바꾸면
+// 스위치와 무관하게 소리가 난다 (unmute 트릭). 첫 터치/키 입력에서 1회 실행.
+let audioUnlocked = false;
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    actx.resume();
+    const a = document.createElement('audio');
+    a.setAttribute('playsinline', '');
+    a.loop = true;
+    a.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAA=';
+    const p = a.play();
+    if (p && p.catch) p.catch(() => { audioUnlocked = false; });   // 거부되면 다음 입력에서 재시도
+  } catch { audioUnlocked = false; }
+}
+document.addEventListener('pointerdown', unlockAudio, { capture: true });
+document.addEventListener('keydown', unlockAudio, { capture: true });
+// 백그라운드에 다녀오면 iOS가 오디오 컨텍스트를 정지시킴 → 복귀 시 재개
+document.addEventListener('visibilitychange', () => { if (!document.hidden && actx) actx.resume().catch(() => {}); });
+
 function sfx(kind) {
   buzz(kind);                                     // 진동은 소리를 꺼도 동작
   if (!data.sound || data.vol <= 0) return;
@@ -599,8 +623,8 @@ document.addEventListener('keyup', e => {
 });
 
 // ── 모바일 터치 제스처 ──
-// 탭 = 한번에 떨어뜨리기(하드드롭). 위로 쓸기 = 회전.
-// 좌우 드래그 = 손가락 따라 칸 단위 이동, 아래 드래그 = 소프트드롭, 빠른 아래 플릭 = 하드드롭.
+// 똑 치면(탭) = 회전 (오른쪽 ⅔ 시계, 왼쪽 ⅓ 반시계).
+// 좌우 드래그 = 손가락 따라 칸 단위 이동, 아래로 쓸면 = 한 번에 떨어뜨리기.
 const cellPx = () => boardCv.getBoundingClientRect().width / COLS;
 let g = null;
 
@@ -608,8 +632,7 @@ boardCv.addEventListener('pointerdown', e => {
   if (!playing) return;
   try { boardCv.setPointerCapture(e.pointerId); } catch {}   // 브라우저별 예외 방어
   g = { x0: e.clientX, y0: e.clientY, t0: performance.now(),
-        moved: 0, dropped: 0, rotated: 0, axis: null, did: false,
-        lastY: e.clientY, lastT: performance.now(), vy: 0 };
+        moved: 0, axis: null, did: false };
   e.preventDefault();
 });
 
@@ -617,22 +640,15 @@ boardCv.addEventListener('pointermove', e => {
   if (!g || !playing) return;
   const px = cellPx();
   const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
-  const now = performance.now();
-  g.vy = (e.clientY - g.lastY) / Math.max(1, now - g.lastT);   // 마지막 구간 속도 (떼는 순간 기준 플릭 판정)
-  g.lastY = e.clientY; g.lastT = now;
   if (!g.axis && (Math.abs(dx) > px * .35 || Math.abs(dy) > px * .35))
     g.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
   if (g.axis === 'x') {
     const cells = Math.round(dx / px);
     while (g.moved < cells) { if (!move(1)) break; g.moved++; g.did = true; }
     while (g.moved > cells) { if (!move(-1)) break; g.moved--; g.did = true; }
-  } else if (g.axis === 'y' && dy > 0) {
-    const cells = Math.round(dy / px);
-    const p = player;                              // 블록이 고정되면 드래그 중단 (새 블록 오폭 방지)
-    while (g.dropped < cells && playing && player === p) { softDrop(); g.dropped++; g.did = true; }
-  } else if (g.axis === 'y' && dy < 0) {           // 위로 쓸기 = 회전 (한 칸 반 올릴 때마다 한 번)
-    const turns = Math.floor(-dy / (px * 1.4));
-    while (g.rotated < turns) { tryRotate(1); g.rotated++; g.did = true; }
+  } else if (g.axis === 'y' && dy > px * 1.2) {    // 아래로 쓸면 = 한 번에 떨어뜨리기
+    hardDrop();
+    g = null;                                      // 제스처 종료 (중복 동작 방지)
   }
   draw();
 });
@@ -643,9 +659,11 @@ boardCv.addEventListener('pointerup', e => {
   const dx = e.clientX - g.x0, dy = e.clientY - g.y0;
   const px = cellPx();
   if (playing) {
-    // 탭 한 번 = 바로 떨어뜨리기, 아래로 빠르게 쓸어도 동일
-    if (!g.did && dt < 300 && Math.hypot(dx, dy) < px * .5) hardDrop();
-    else if (g.axis === 'y' && g.vy > 0.9 && dy > px * 1.5) hardDrop();
+    // 똑 치면 = 회전 (왼쪽 ⅓은 반시계)
+    if (!g.did && dt < 300 && Math.hypot(dx, dy) < px * .5) {
+      const rect = boardCv.getBoundingClientRect();
+      tryRotate((e.clientX - rect.left) < rect.width / 3 ? -1 : 1);
+    }
     draw();
   }
   g = null;
@@ -691,7 +709,7 @@ renderLog();
 syncSettingsUI();
 // 조작 안내: 터치 기기는 제스처, 좁은 창은 키 요약 (우측 안내 카드가 숨겨지므로)
 if (matchMedia('(hover: none)').matches)
-  $('ov-msg').textContent = '탭 = 바로 떨어뜨리기 · 좌우 드래그 이동 · 위로 쓸면 회전 · 아래로 끌면 살살';
+  $('ov-msg').textContent = '똑 치면 회전 · 좌우 드래그 이동 · 아래로 쓸면 바로 떨어짐';
 else if (matchMedia('(max-width: 720px)').matches)
   $('ov-msg').textContent = '← → 이동 · ↑ 회전 · ↓ 내리기 · Space 드롭 · P 일시정지';
 if ('serviceWorker' in navigator && location.protocol !== 'file:')
