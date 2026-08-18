@@ -190,7 +190,7 @@
 
 <script>
 'use strict';
-const APP_VER = 'v3.1 · 2026.08.12';   // 배포 확인용 — 업데이트 때마다 올린다
+const APP_VER = 'v3.2 · 2026.08.12';   // 배포 확인용 — 업데이트 때마다 올린다
 const COLS = 10, ROWS = 20;
 let CELL = 30;                                    // 화면 크기에 맞춰 매번 다시 계산
 const SHAPES = {
@@ -217,7 +217,7 @@ function saveData() { try { localStorage.setItem(STORE_KEY, JSON.stringify(data)
 let data = loadData();
 
 let board, player, nextType, bag = [];
-let score = 0, lines = 0, level = 1, dropTimer = 0, dropInterval = 850, playing = false, paused = false, over = false;
+let score = 0, lines = 0, level = 1, dropTimer = 0, dropInterval = 690, playing = false, paused = false, over = false;
 let lockTimer = 0, lockResets = 0;                // 락 딜레이: 바닥에 닿아도 잠시 미세조정 가능
 let rafId = null, lastTime = 0;
 
@@ -237,57 +237,80 @@ function buzz(kind) {
 let actx = null;
 
 // 아이폰은 무음 스위치가 켜져 있으면 WebAudio가 통째로 묵음이 된다.
-// 무음 오디오 태그를 한 번 재생해 오디오 세션을 '미디어 재생' 모드로 바꾸면
-// 스위치와 무관하게 소리가 난다 (unmute 트릭). 첫 터치/키 입력에서 1회 실행.
-let audioUnlocked = false;
+// 무음 오디오를 계속 재생해 오디오 세션을 '미디어 재생' 모드로 붙잡아 두면
+// 스위치와 무관하게 소리가 난다 (unmute 트릭).
+// ⚠ 이 <audio> 참조는 반드시 유지해야 한다 — 지역변수로 두면 GC에 수거돼 묵음으로 되돌아간다.
+let silentEl = null;
+
+function ensureCtx() {
+  if (!actx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    actx = new AC();
+  }
+  return actx;
+}
+
+// 터치·키 입력마다 호출 — 이미 깨어 있으면 즉시 반환하므로 비용이 없다.
+// (한 번만 실행하면 통화·백그라운드 복귀로 잠든 뒤 영영 못 깨어난다)
 function unlockAudio() {
-  if (audioUnlocked) return;
-  audioUnlocked = true;
   try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    actx.resume();
-    const a = document.createElement('audio');
-    a.setAttribute('playsinline', '');
-    a.loop = true;
-    a.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAA=';
-    const p = a.play();
-    if (p && p.catch) p.catch(() => { audioUnlocked = false; });   // 거부되면 다음 입력에서 재시도
-  } catch { audioUnlocked = false; }
+    const c = ensureCtx();
+    if (c && c.state !== 'running') c.resume().catch(() => {});
+    if (!silentEl) {
+      silentEl = document.createElement('audio');
+      silentEl.setAttribute('playsinline', '');
+      silentEl.loop = true;
+      silentEl.volume = .001;
+      silentEl.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAAA=';
+      document.body.appendChild(silentEl);          // DOM에 붙여 수거 방지
+    }
+    if (silentEl.paused) { const p = silentEl.play(); if (p && p.catch) p.catch(() => {}); }
+  } catch {}
 }
 document.addEventListener('pointerdown', unlockAudio, { capture: true });
 document.addEventListener('keydown', unlockAudio, { capture: true });
-// 백그라운드에 다녀오면 iOS가 오디오 컨텍스트를 정지시킴 → 복귀 시 재개
-document.addEventListener('visibilitychange', () => { if (!document.hidden && actx) actx.resume().catch(() => {}); });
+document.addEventListener('touchstart', unlockAudio, { capture: true, passive: true });
+// 백그라운드에 다녀오면 iOS가 오디오를 정지시킴 → 복귀 시 재개
+document.addEventListener('visibilitychange', () => { if (!document.hidden) unlockAudio(); });
+
+// 실제 발음. 예약 시각이 과거가 되지 않도록 아주 짧은 여유(4ms)를 둔다.
+function emit(kind) {
+  const t0 = actx.currentTime + .004;
+  const tone = (freq, dur, type, vol, delay = 0, freq2 = null) => {
+    const o = actx.createOscillator(), gn = actx.createGain(), t = t0 + delay;
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (freq2) o.frequency.exponentialRampToValueAtTime(freq2, t + dur);
+    gn.gain.setValueAtTime(0, t);
+    gn.gain.linearRampToValueAtTime(vol * data.vol * 1.25, t + .006);
+    gn.gain.exponentialRampToValueAtTime(.0001, t + dur);
+    o.connect(gn).connect(actx.destination);
+    o.start(t); o.stop(t + dur + .02);
+  };
+  switch (kind) {
+    case 'move':   tone(200, .04, 'square', .035); break;
+    case 'rotate': tone(430, .06, 'triangle', .06); break;
+    case 'drop':   tone(360, .12, 'sawtooth', .05, 0, 90); break;   // 하강 스윕
+    case 'lock':   tone(110, .09, 'sine', .09); break;
+    case 'clear':  [523, 659, 784].forEach((f, i) => tone(f, .16, 'triangle', .08, i * .05)); break;
+    case 'tetris': [523, 659, 784, 1047].forEach((f, i) => tone(f, .24, 'triangle', .1, i * .06)); break;
+    case 'level':  [659, 880].forEach((f, i) => tone(f, .18, 'square', .07, i * .09)); break;
+    case 'over':   [440, 349, 262, 196].forEach((f, i) => tone(f, .3, 'triangle', .09, i * .13)); break;
+    case 'start':  [392, 523, 659].forEach((f, i) => tone(f, .14, 'triangle', .07, i * .06)); break;
+  }
+}
 
 function sfx(kind) {
   buzz(kind);                                     // 진동은 소리를 꺼도 동작
   if (!data.sound || data.vol <= 0) return;
   try {
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
-    if (actx.state === 'suspended') actx.resume();
-    const t0 = actx.currentTime;
-    const tone = (freq, dur, type, vol, delay = 0, freq2 = null) => {
-      const o = actx.createOscillator(), gn = actx.createGain(), t = t0 + delay;
-      o.type = type;
-      o.frequency.setValueAtTime(freq, t);
-      if (freq2) o.frequency.exponentialRampToValueAtTime(freq2, t + dur);
-      gn.gain.setValueAtTime(0, t);
-      gn.gain.linearRampToValueAtTime(vol * data.vol * 1.25, t + .006);
-      gn.gain.exponentialRampToValueAtTime(.0001, t + dur);
-      o.connect(gn).connect(actx.destination);
-      o.start(t); o.stop(t + dur + .02);
-    };
-    switch (kind) {
-      case 'move':   tone(200, .04, 'square', .035); break;
-      case 'rotate': tone(430, .06, 'triangle', .06); break;
-      case 'drop':   tone(360, .12, 'sawtooth', .05, 0, 90); break;   // 하강 스윕
-      case 'lock':   tone(110, .09, 'sine', .09); break;
-      case 'clear':  [523, 659, 784].forEach((f, i) => tone(f, .16, 'triangle', .08, i * .05)); break;
-      case 'tetris': [523, 659, 784, 1047].forEach((f, i) => tone(f, .24, 'triangle', .1, i * .06)); break;
-      case 'level':  [659, 880].forEach((f, i) => tone(f, .18, 'square', .07, i * .09)); break;
-      case 'over':   [440, 349, 262, 196].forEach((f, i) => tone(f, .3, 'triangle', .09, i * .13)); break;
-      case 'start':  [392, 523, 659].forEach((f, i) => tone(f, .14, 'triangle', .07, i * .06)); break;
-    }
+    const c = ensureCtx();
+    if (!c) return;
+    // 잠들어 있으면 깨운 "뒤에" 발음한다. resume()은 비동기라서
+    // 곧바로 예약하면 깨어나기 전에 시각이 지나가 소리가 통째로 사라진다.
+    if (c.state === 'running') emit(kind);
+    else c.resume().then(() => emit(kind)).catch(() => {});
   } catch {}                                       // 오디오 불가 기기에서도 게임은 계속
 }
 
@@ -417,7 +440,7 @@ function clearLines() {
   const newLevel = data.startLevel + Math.floor(lines / 10);   // 시작 레벨 기준으로 상승
   sfx(n === 4 ? 'tetris' : 'clear');
   if (newLevel > level) { level = newLevel; sfx('level'); }
-  dropInterval = Math.max(70, 850 - (level - 1) * 75);
+  dropInterval = Math.max(58, 690 - (level - 1) * 64);
   boardCv.classList.add('flash');
   setTimeout(() => boardCv.classList.remove('flash'), 120);
   updateHud();
@@ -512,7 +535,7 @@ function showOverlay(title, msg, btn, withExtras = false) {
 function startGame() {
   board = emptyBoard(); bag = []; nextType = null;
   score = 0; lines = 0; level = data.startLevel;               // 잘하면 바로 높은 단계부터
-  dropInterval = Math.max(70, 850 - (level - 1) * 75);
+  dropInterval = Math.max(58, 690 - (level - 1) * 64);
   dropTimer = 0; lastTime = 0;
   lockTimer = 0; lockResets = 0;
   over = false; paused = false; playing = true;
@@ -555,7 +578,7 @@ function syncSettingsUI() {
 // ── 입력 시스템: OS 키 반복 대신 자체 DAS(Delayed Auto Shift) ──
 // 첫 입력은 즉시, 꾹 누르면 DAS 후 ARR 간격으로 연속 이동.
 // 좌우 동시 입력 시 나중에 누른 방향이 우선, 떼면 남은 방향으로 복귀.
-const DAS = 105, ARR = 22, SOFT_ARR = 28, LOCK_DELAY = 480;
+const DAS = 85, ARR = 15, SOFT_ARR = 19, LOCK_DELAY = 400;
 const held = { left: false, right: false, down: false };
 let moveDir = 0, dasTimer = 0, arrTimer = 0, softTimer = 0;
 
