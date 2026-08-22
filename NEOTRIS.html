@@ -55,7 +55,8 @@
   .num { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
   #stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 8px; }
   #stats small { color: var(--dim); font-size: 11px; display: block; margin-bottom: 2px; }
-  canvas#next { display: block; margin: 0 auto; }
+  canvas#next, canvas#hold { display: block; margin: 0 auto; }
+  #hold-card { cursor: pointer; }
   #tools { display: flex; gap: 8px; flex: none; }
   #tools button {
     flex: 1; font: inherit; font-size: 16px; color: var(--text); cursor: pointer;
@@ -111,16 +112,17 @@
     #brand span { display: none; }
     #wrap { flex-direction: column; gap: 6px; }
     aside { order: -1; width: 100%; flex-direction: row; gap: 6px; align-items: stretch; }
-    aside .card { flex: 1; padding: 5px 8px; }
-    aside .card h2 { font-size: 9px; margin-bottom: 2px; letter-spacing: .05em; }
-    .card:has(#next) { flex: 0 0 auto; }
-    canvas#next { width: 40px; height: 40px; }
+    aside .card { flex: 1; padding: 4px 7px; display: flex; align-items: center; }
+    aside .card h2 { display: none; }               /* 좁은 화면에선 라벨을 빼고 그 높이를 보드에 준다 */
+    #stats { display: flex; gap: 9px; align-items: baseline; width: 100%; justify-content: space-around; }
+    #stats > div { display: flex; gap: 3px; align-items: baseline; }
+    #stats > div:nth-child(2) { display: none; }    /* 최고점수는 시작 화면에 있으므로 생략 */
+    .card:has(#next), .card:has(#hold) { flex: 0 0 auto; }
     .num { font-size: 14px; }
-    #stats { gap: 0 8px; }
     #stats small { font-size: 9px; margin: 0; }
     #tools { flex: 0 0 42px; flex-direction: column; gap: 4px; }
     #tools button { padding: 0; font-size: 14px; }
-    .keys { display: none; }
+    aside .card.keys { display: none; }   /* aside .card 규칙보다 우선하도록 특이성 확보 */
   }
   /* 세로가 짧은 화면(구형 폰)에선 로고를 빼고 그만큼 보드에 준다 */
   @media (max-height: 660px) and (orientation: portrait) { #brand { display: none; } }
@@ -131,11 +133,10 @@
     #wrap { flex-direction: row; align-items: stretch; }
     aside { order: 0; width: 148px; flex-direction: column; gap: 5px; }
     aside .card { flex: none; }
-    canvas#next { width: 44px; height: 44px; }
     #tools { flex-direction: row; flex: none; }
     #tools button { padding: 6px 0; }
   }
-  @media (hover: none) { .keys { display: none; } }
+  @media (hover: none) { aside .card.keys { display: none; } }
 </style>
 </head>
 <body>
@@ -163,7 +164,8 @@
     </div>
   </div>
   <aside>
-    <div class="card"><h2>다음 블록</h2><canvas id="next" width="120" height="120"></canvas></div>
+    <div class="card" id="hold-card" title="홀드 (C)"><h2>홀드</h2><canvas id="hold"></canvas></div>
+    <div class="card"><h2>다음</h2><canvas id="next"></canvas></div>
     <div class="card"><h2>기록</h2>
       <div id="stats">
         <div><small>점수</small><div class="num" id="score">0</div></div>
@@ -178,10 +180,10 @@
     </div>
     <div class="card keys">
       <b>←</b> <b>→</b> 이동 (꾹 누르면 연속)<br>
-      <b>↑</b> <b>X</b> 회전 (시계)<br>
-      <b>Z</b> 회전 (반시계)<br>
-      <b>↓</b> 살살 내리기 (꾹 누르기)<br>
-      <b>Space</b> 한번에 떨어뜨리기<br>
+      <b>↑</b> <b>X</b> 회전 · <b>Z</b> 반대로<br>
+      <b>A</b> 180도 회전<br>
+      <b>C</b> <b>Shift</b> 홀드 (보관)<br>
+      <b>↓</b> 살살 내리기 · <b>Space</b> 드롭<br>
       <b>P</b> 일시정지 · <b>S</b> 소리 · <b>R</b> 새 게임
     </div>
   </aside>
@@ -190,7 +192,7 @@
 
 <script>
 'use strict';
-const APP_VER = 'v3.2 · 2026.08.12';   // 배포 확인용 — 업데이트 때마다 올린다
+const APP_VER = 'v4.0 · 2026.08.12';   // 배포 확인용 — 업데이트 때마다 올린다
 const COLS = 10, ROWS = 20;
 let CELL = 30;                                    // 화면 크기에 맞춰 매번 다시 계산
 const SHAPES = {
@@ -206,6 +208,7 @@ const COLORS = { I:'#4dd8e6', O:'#f2d94e', T:'#b06ee6', S:'#5fe08a', Z:'#e66e7a'
 
 const boardCv = document.getElementById('board'), bctx = boardCv.getContext('2d');
 const nextCv = document.getElementById('next'), nctx = nextCv.getContext('2d');
+const holdCv = document.getElementById('hold'), hctx = holdCv.getContext('2d');
 const $ = id => document.getElementById(id);
 
 // 로컬 기록 저장 (최고 점수 + 최근 플레이 로그 + 소리·진동·시작 레벨 설정)
@@ -216,7 +219,8 @@ function loadData() { try { return Object.assign({}, DEFAULTS, JSON.parse(localS
 function saveData() { try { localStorage.setItem(STORE_KEY, JSON.stringify(data)); } catch {} }
 let data = loadData();
 
-let board, player, nextType, bag = [];
+let board, player, bag = [], queue = [], holdType = null, holdUsed = false;
+let combo = -1, b2b = 0, toast = { text: '', until: 0, big: false };
 let score = 0, lines = 0, level = 1, dropTimer = 0, dropInterval = 690, playing = false, paused = false, over = false;
 let lockTimer = 0, lockResets = 0;                // 락 딜레이: 바닥에 닿아도 잠시 미세조정 가능
 let rafId = null, lastTime = 0;
@@ -225,7 +229,7 @@ function emptyBoard() { return Array.from({length: ROWS}, () => Array(COLS).fill
 
 // ── 햅틱: 필요한 순간에만 짧게, 강도는 진동 시간으로 조절 ──
 // (안드로이드 크롬 지원. 아이폰 사파리는 웹 진동 미지원이라 무시됨)
-const HAPTIC = { rotate: 9, drop: 16, lock: 12, clear: 28, tetris: [30,30,30,30,70], level: [20,30,45], over: [70,40,130], start: 14 };
+const HAPTIC = { rotate: 9, drop: 16, lock: 12, hold: 10, clear: 28, tetris: [30,30,30,30,70], level: [20,30,45], over: [70,40,130], start: 14 };
 function buzz(kind) {
   const p = HAPTIC[kind];
   if (!p || !data.vib || !navigator.vibrate) return;
@@ -298,6 +302,7 @@ function emit(kind) {
     case 'level':  [659, 880].forEach((f, i) => tone(f, .18, 'square', .07, i * .09)); break;
     case 'over':   [440, 349, 262, 196].forEach((f, i) => tone(f, .3, 'triangle', .09, i * .13)); break;
     case 'start':  [392, 523, 659].forEach((f, i) => tone(f, .14, 'triangle', .07, i * .06)); break;
+    case 'hold':   tone(300, .07, 'triangle', .05, 0, 480); break;
   }
 }
 
@@ -325,7 +330,22 @@ function fitCanvas() {
   boardCv.width = Math.round(COLS * CELL * dpr);
   boardCv.height = Math.round(ROWS * CELL * dpr);
   bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  fitPanels(dpr);
   if (board) draw();
+}
+
+// 홀드·다음 미리보기 캔버스: 세로 화면에선 가로로 눕혀 상단 바에 얇게 넣는다
+function fitPanels(dpr) {
+  const narrow = matchMedia('(max-width: 720px)').matches && matchMedia('(orientation: portrait)').matches;
+  nextHoriz = narrow;
+  const size = (cv, ctx, w, h) => {
+    cv.style.width = w + 'px'; cv.style.height = h + 'px';
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  };
+  if (narrow) { size(holdCv, hctx, 32, 26); size(nextCv, nctx, 124, 26); }
+  else        { size(holdCv, hctx, 120, 52); size(nextCv, nctx, 120, 224); }
+  drawNext(); drawHold();
 }
 
 // 7-bag 랜더마이저: 7종을 한 묶음씩 섞어 뽑아 같은 블록 가뭄 방지
@@ -340,8 +360,27 @@ function nextFromBag() {
   return bag.pop();
 }
 
+function refillQueue() { while (queue.length < 6) queue.push(nextFromBag()); }
+
 function rotCW(m)  { return m[0].map((_, x) => m.map(r => r[x]).reverse()); }
 function rotCCW(m) { return m[0].map((_, x) => m.map(r => r[m[0].length - 1 - x])); }
+
+// ── SRS(슈퍼 로테이션 시스템) 월킥 표 — 테트리스 가이드라인 표준 ──
+// 회전이 막히면 5개 후보 위치를 순서대로 시도한다. 이 표 덕분에 벽·바닥·좁은 틈에
+// 끼워 넣는 회전(T-스핀 포함)이 가능해진다. 표의 +y는 '위쪽'이라 화면 좌표에선 부호를 뒤집는다.
+const KICK_JLSTZ = {
+  '01': [[0,0],[-1,0],[-1, 1],[0,-2],[-1,-2]], '10': [[0,0],[ 1,0],[ 1,-1],[0, 2],[ 1, 2]],
+  '12': [[0,0],[ 1,0],[ 1,-1],[0, 2],[ 1, 2]], '21': [[0,0],[-1,0],[-1, 1],[0,-2],[-1,-2]],
+  '23': [[0,0],[ 1,0],[ 1, 1],[0,-2],[ 1,-2]], '32': [[0,0],[-1,0],[-1,-1],[0, 2],[-1, 2]],
+  '30': [[0,0],[-1,0],[-1,-1],[0, 2],[-1, 2]], '03': [[0,0],[ 1,0],[ 1, 1],[0,-2],[ 1,-2]],
+};
+const KICK_I = {
+  '01': [[0,0],[-2,0],[ 1,0],[-2,-1],[ 1, 2]], '10': [[0,0],[ 2,0],[-1,0],[ 2, 1],[-1,-2]],
+  '12': [[0,0],[-1,0],[ 2,0],[-1, 2],[ 2,-1]], '21': [[0,0],[ 1,0],[-2,0],[ 1,-2],[-2, 1]],
+  '23': [[0,0],[ 2,0],[-1,0],[ 2, 1],[-1,-2]], '32': [[0,0],[-2,0],[ 1,0],[-2,-1],[ 1, 2]],
+  '30': [[0,0],[ 1,0],[-2,0],[ 1,-2],[-2, 1]], '03': [[0,0],[-1,0],[ 2,0],[-1, 2],[ 2,-1]],
+};
+const KICK_180 = [[0,0],[0,1],[0,2],[1,0],[-1,0]];   // 180도는 가이드라인 표준이 없어 간이 보정
 
 function collide(matrix, pos) {
   for (let y = 0; y < matrix.length; y++)
@@ -361,22 +400,44 @@ function touchLock() {
   if (player && onGround() && lockResets < 15) { lockTimer = 0; lockResets++; }
 }
 
-function spawn() {
-  const type = nextType || nextFromBag();
-  nextType = nextFromBag();
+// forced가 있으면 큐를 건드리지 않고 그 조각을 띄운다 (홀드 교체용)
+function spawn(forced) {
+  const type = forced || queue.shift();
+  if (!forced) refillQueue();
   const matrix = SHAPES[type].map(r => r.slice());
-  player = { type, matrix, x: Math.floor((COLS - matrix[0].length) / 2), y: -1 };
+  player = { type, matrix, rot: 0, x: Math.floor((COLS - matrix[0].length) / 2), y: -1,
+             spun: false, lastKick: 0 };
   dropTimer = 0; lockTimer = 0; lockResets = 0;
   if (collide(player.matrix, player)) return gameOver();   // 스폰 자리가 막히면 즉시 게임오버 (블록아웃)
   drawNext();
 }
 
+// 홀드: 지금 조각을 보관하고 보관해 둔 조각과 바꾼다. 한 조각당 한 번만.
+function holdPiece() {
+  if (!playing || holdUsed) return false;
+  holdUsed = true;
+  const cur = player.type;
+  if (holdType) { const t = holdType; holdType = cur; spawn(t); }
+  else { holdType = cur; spawn(); }
+  sfx('hold'); drawHold();
+  return true;
+}
+
 function tryRotate(dir) {
-  const m = dir > 0 ? rotCW(player.matrix) : rotCCW(player.matrix);
-  for (const dx of [0, -1, 1, -2, 2]) {          // 간단 월킥
-    const pos = { x: player.x + dx, y: player.y };
+  if (player.type === 'O') return false;                    // O는 회전해도 모양이 같다
+  const from = player.rot;
+  let m, to;
+  if (dir === 2)      { m = rotCW(rotCW(player.matrix)); to = (from + 2) % 4; }
+  else if (dir > 0)   { m = rotCW(player.matrix);        to = (from + 1) % 4; }
+  else                { m = rotCCW(player.matrix);       to = (from + 3) % 4; }
+  const table = dir === 2 ? KICK_180
+              : (player.type === 'I' ? KICK_I : KICK_JLSTZ)['' + from + to];
+  for (let i = 0; i < table.length; i++) {
+    const [kx, ky] = table[i];
+    const pos = { x: player.x + kx, y: player.y - ky };     // 표의 +y는 위쪽 → 화면 좌표는 반대
     if (!collide(m, pos)) {
-      player.matrix = m; player.x = pos.x;
+      player.matrix = m; player.x = pos.x; player.y = pos.y; player.rot = to;
+      player.spun = true; player.lastKick = i;              // T-스핀 판정에 쓰임
       touchLock(); sfx('rotate');
       return true;
     }
@@ -384,17 +445,35 @@ function tryRotate(dir) {
   return false;
 }
 
+// T-스핀 판정(3-코너 규칙): 마지막 동작이 회전이고, T 조각 3x3 상자의 네 모서리 중
+// 3개 이상이 막혀 있으면 T-스핀. 앞쪽 두 모서리가 다 막히면 정식, 하나면 미니.
+// 마지막(5번째) 킥으로 비집고 들어갔으면 항상 정식으로 친다(TST 등).
+const T_FRONT = { 0: [[0,0],[2,0]], 1: [[2,0],[2,2]], 2: [[0,2],[2,2]], 3: [[0,0],[0,2]] };
+function detectSpin() {
+  if (!player || player.type !== 'T' || !player.spun) return null;
+  const blocked = (cx, cy) => {
+    const bx = player.x + cx, by = player.y + cy;
+    if (bx < 0 || bx >= COLS || by >= ROWS) return true;    // 벽·바닥은 막힌 것으로 본다
+    if (by < 0) return false;
+    return !!board[by][bx];
+  };
+  const total = [[0,0],[2,0],[0,2],[2,2]].filter(c => blocked(c[0], c[1])).length;
+  if (total < 3) return null;
+  const front = T_FRONT[player.rot].filter(c => blocked(c[0], c[1])).length;
+  return (front === 2 || player.lastKick === 4) ? 'tspin' : 'mini';
+}
+
 function move(dx) {
   const pos = { x: player.x + dx, y: player.y };
   if (collide(player.matrix, pos)) return false;
-  player.x = pos.x;
+  player.x = pos.x; player.spun = false;
   touchLock(); sfx('move');
   return true;
 }
 
 function softDrop() {
   if (onGround()) return false;                  // 고정은 락 딜레이가 처리
-  player.y++;
+  player.y++; player.spun = false;
   score += 1;
   dropTimer = 0;
   updateHud();
@@ -404,6 +483,7 @@ function softDrop() {
 function hardDrop() {
   let dist = 0;
   while (!onGround()) { player.y++; dist++; }
+  if (dist) player.spun = false;
   score += dist * 2;
   sfx('drop');
   lock();
@@ -417,15 +497,31 @@ function ghostY() {
 }
 
 function lock() {
+  const spin = detectSpin();                       // 굳히기 직전 자세로 판정해야 한다
+  let above = false;
   player.matrix.forEach((row, y) => row.forEach((v, x) => {
-    if (v && player.y + y >= 0) board[player.y + y][player.x + x] = player.type;
+    if (!v) return;
+    const by = player.y + y;
+    if (by < 0) { above = true; return; }
+    board[by][player.x + x] = player.type;
   }));
   sfx('lock');
-  clearLines();
+  clearLines(spin);
+  if (above) return gameOver();                    // 조각이 화면 위로 넘쳐 굳으면 종료(락아웃)
+  holdUsed = false;                                // 새 조각에는 홀드를 다시 쓸 수 있다
   spawn();
 }
 
-function clearLines() {
+// 가이드라인 낙하 곡선: (0.8 - (lv-1)*0.007)^(lv-1). 1레벨을 690ms에 맞춰 전체를 조금 빠르게 했고,
+// 사람이 반응할 수 있는 하한(60ms)을 둔다.
+function gravityFor(lv) {
+  return Math.max(60, Math.pow(Math.max(.05, .8 - (lv - 1) * .007), lv - 1) * 690);
+}
+
+function showToast(text, big) { toast = { text, until: performance.now() + 1100, big: !!big }; }
+
+// 가이드라인 점수표 + 백투백 1.5배 + 콤보 + 퍼펙트 클리어
+function clearLines(spin) {
   let n = 0;
   for (let y = ROWS - 1; y >= 0; y--) {
     if (board[y].every(c => c)) {
@@ -434,15 +530,35 @@ function clearLines() {
       n++; y++;
     }
   }
-  if (!n) return;
-  lines += n;
-  score += [0, 100, 300, 500, 800][n] * level;
+  if (!n && !spin) { combo = -1; return; }          // 줄도 스핀도 없으면 콤보 끊김
+
+  let pts = 0, hard = false, label = '';
+  if (spin === 'tspin')     { pts = [400, 800, 1200, 1600][n];  hard = n > 0; label = ['T-스핀','T-스핀 싱글','T-스핀 더블','T-스핀 트리플'][n]; }
+  else if (spin === 'mini') { pts = [100, 200, 400, 400][n];    hard = n > 0; label = ['미니 T-스핀','미니 T-스핀 싱글','미니 T-스핀 더블','미니 T-스핀'][n]; }
+  else                      { pts = [0, 100, 300, 500, 800][n]; hard = n === 4; label = ['','싱글','더블','트리플','테트리스'][n]; }
+
+  if (n > 0) {
+    if (hard) { if (b2b > 0) { pts = Math.round(pts * 1.5); label = 'B2B ' + label; } b2b++; }
+    else b2b = 0;
+    combo++;
+    if (combo > 0) { pts += 50 * combo; label += ` · ${combo}콤보`; }
+    lines += n;
+    if (board.every(r => r.every(c => !c))) {        // 퍼펙트 클리어 (판을 통째로 비움)
+      pts += [0, 800, 1200, 1800, 2000][n];
+      label = '퍼펙트 클리어!';
+    }
+  }
+  score += pts * level;
+
   const newLevel = data.startLevel + Math.floor(lines / 10);   // 시작 레벨 기준으로 상승
-  sfx(n === 4 ? 'tetris' : 'clear');
+  sfx(spin ? 'tetris' : (n === 4 ? 'tetris' : (n ? 'clear' : 'rotate')));
   if (newLevel > level) { level = newLevel; sfx('level'); }
-  dropInterval = Math.max(58, 690 - (level - 1) * 64);
-  boardCv.classList.add('flash');
-  setTimeout(() => boardCv.classList.remove('flash'), 120);
+  dropInterval = gravityFor(level);
+  if (label) showToast(label, hard || !!spin);
+  if (n) {
+    boardCv.classList.add('flash');
+    setTimeout(() => boardCv.classList.remove('flash'), 120);
+  }
   updateHud();
 }
 
@@ -505,15 +621,50 @@ function draw() {
       if (v && player.y + y >= 0) drawCell(bctx, (player.x + x) * CELL, (player.y + y) * CELL + off, CELL, COLORS[player.type]);
     }));
   }
+
+  if (toast.text && performance.now() < toast.until) {          // 테트리스·T스핀·콤보 알림
+    const left = (toast.until - performance.now()) / 1100;
+    bctx.save();
+    bctx.globalAlpha = Math.min(1, left * 2.2);
+    bctx.textAlign = 'center';
+    bctx.font = `900 ${Math.round(CELL * (toast.big ? .78 : .62))}px 'Apple SD Gothic Neo', sans-serif`;
+    bctx.fillStyle = toast.big ? '#f2d94e' : '#4dd8e6';
+    bctx.shadowColor = bctx.fillStyle; bctx.shadowBlur = 18;
+    bctx.fillText(toast.text, COLS * CELL / 2, ROWS * CELL * .34);
+    bctx.restore();
+  }
 }
 
+// 조각 하나를 주어진 칸 안에 가운데 맞춰 그린다
+function drawPieceIn(ctx, type, ox, oy, w, h, scale, alpha) {
+  const cells = [];
+  SHAPES[type].forEach((row, y) => row.forEach((v, x) => { if (v) cells.push([x, y]); }));
+  const xs = cells.map(c => c[0]), ys = cells.map(c => c[1]);
+  const minX = Math.min(...xs), minY = Math.min(...ys);
+  const pw = Math.max(...xs) - minX + 1, ph = Math.max(...ys) - minY + 1;
+  const size = Math.max(4, Math.floor(Math.min(w / (pw + .6), h / (ph + .6)) * scale));
+  const px = ox + (w - pw * size) / 2, py = oy + (h - ph * size) / 2;
+  ctx.globalAlpha = alpha == null ? 1 : alpha;
+  cells.forEach(([x, y]) => drawCell(ctx, px + (x - minX) * size, py + (y - minY) * size, size, COLORS[type]));
+  ctx.globalAlpha = 1;
+}
+
+let nextHoriz = false;
 function drawNext() {
-  nctx.clearRect(0, 0, nextCv.width, nextCv.height);
-  const m = SHAPES[nextType];
-  const size = 24;
-  const w = m[0].length, h = m.filter(r => r.some(v => v)).length;
-  const ox = (nextCv.width - w * size) / 2, oy = (nextCv.height - h * size) / 2;
-  m.forEach((row, y) => row.forEach((v, x) => { if (v) drawCell(nctx, ox + x * size, oy + y * size, size, COLORS[nextType]); }));
+  const W = nextCv.clientWidth, H = nextCv.clientHeight;
+  nctx.clearRect(0, 0, W, H);
+  const n = Math.min(5, queue.length);
+  for (let i = 0; i < n; i++) {
+    const sw = nextHoriz ? W / 5 : W, sh = nextHoriz ? H : H / 5;
+    drawPieceIn(nctx, queue[i], nextHoriz ? sw * i : 0, nextHoriz ? 0 : sh * i,
+                sw, sh, i === 0 ? 1 : .82, i === 0 ? 1 : .72);
+  }
+}
+
+function drawHold() {
+  const W = holdCv.clientWidth, H = holdCv.clientHeight;
+  hctx.clearRect(0, 0, W, H);
+  if (holdType) drawPieceIn(hctx, holdType, 0, 0, W, H, 1, holdUsed ? .3 : 1);
 }
 
 function updateHud() {
@@ -533,15 +684,16 @@ function showOverlay(title, msg, btn, withExtras = false) {
 }
 
 function startGame() {
-  board = emptyBoard(); bag = []; nextType = null;
+  board = emptyBoard(); bag = []; queue = []; refillQueue();
+  holdType = null; holdUsed = false; combo = -1; b2b = 0; toast.text = '';
   score = 0; lines = 0; level = data.startLevel;               // 잘하면 바로 높은 단계부터
-  dropInterval = Math.max(58, 690 - (level - 1) * 64);
+  dropInterval = gravityFor(level);
   dropTimer = 0; lastTime = 0;
   lockTimer = 0; lockResets = 0;
   over = false; paused = false; playing = true;
   clearHeld();
   $('overlay').classList.add('hide');
-  spawn(); updateHud(); sfx('start');
+  spawn(); drawHold(); updateHud(); sfx('start');
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(loop);
 }
@@ -633,9 +785,12 @@ document.addEventListener('keydown', e => {
     case 'ArrowDown':  held.down = true;  softTimer = 0; softDrop(); break;
     case 'ArrowUp':    tryRotate(1); break;
     case ' ':          hardDrop(); break;
+    case 'Shift':      holdPiece(); break;
     default:
       if (k === 'x') tryRotate(1);
-      else if (k === 'z') tryRotate(-1);
+      else if (k === 'z' || k === 'control') tryRotate(-1);
+      else if (k === 'a') tryRotate(2);
+      else if (k === 'c') holdPiece();
   }
   draw();
 });
@@ -675,6 +830,9 @@ boardCv.addEventListener('pointermove', e => {
   } else if (g.axis === 'y' && dy > px * 1.2) {    // 아래로 쓸면 = 한 번에 떨어뜨리기
     hardDrop();
     g = null;                                      // 제스처 종료 (중복 동작 방지)
+  } else if (g.axis === 'y' && dy < -px * 1.2) {   // 위로 쓸면 = 홀드(보관)
+    holdPiece();
+    g = null;
   }
   draw();
 });
@@ -696,6 +854,7 @@ boardCv.addEventListener('pointerup', e => {
 });
 boardCv.addEventListener('pointercancel', () => { g = null; });
 
+$('hold-card').addEventListener('click', holdPiece);
 $('btn-pause').addEventListener('click', togglePause);
 $('btn-sound').addEventListener('click', toggleSound);
 $('set-sound').addEventListener('click', toggleSound);
@@ -723,6 +882,10 @@ $('ov-btn').addEventListener('click', () => {
   startGame();
 });
 window.addEventListener('blur', () => { clearHeld(); if (playing) togglePause(); });
+// 무대 크기가 바뀌면(글꼴 로딩·회전·주소창 숨김 등) 그때마다 다시 맞춘다.
+// 최초 1회만 계산하면 레이아웃이 확정되기 전 값이라 보드가 작게 잡힌다.
+if (window.ResizeObserver) new ResizeObserver(() => fitCanvas()).observe($('stage'));
+window.addEventListener('load', fitCanvas);
 window.addEventListener('resize', fitCanvas);
 window.addEventListener('orientationchange', () => setTimeout(fitCanvas, 200));
 if (window.visualViewport) visualViewport.addEventListener('resize', fitCanvas);
@@ -736,9 +899,9 @@ syncSettingsUI();
 $('ov-ver').textContent = 'NEOTRIS ' + APP_VER;
 // 조작 안내: 터치 기기는 제스처, 좁은 창은 키 요약 (우측 안내 카드가 숨겨지므로)
 if (matchMedia('(hover: none)').matches)
-  $('ov-msg').textContent = '똑 치면 회전 · 좌우 드래그 이동 · 아래로 쓸면 바로 떨어짐';
+  $('ov-msg').textContent = '똑 치면 회전 · 좌우 드래그 이동 · 아래로 쓸면 드롭 · 위로 쓸면 홀드';
 else if (matchMedia('(max-width: 720px)').matches)
-  $('ov-msg').textContent = '← → 이동 · ↑ 회전 · ↓ 내리기 · Space 드롭 · P 일시정지';
+  $('ov-msg').textContent = '← → 이동 · ↑ 회전 · C 홀드 · Space 드롭 · P 일시정지';
 if ('serviceWorker' in navigator && location.protocol !== 'file:')
   navigator.serviceWorker.register('sw.js').catch(() => {});
 
@@ -766,7 +929,9 @@ document.addEventListener('visibilitychange', checkFresh);
 window.addEventListener('pageshow', checkFresh);              // iOS 뒤로가기 캐시 복원 대응
 checkFresh();
 window.__t = { get player(){return player}, get board(){return board}, get gesture(){return g},
-               get state(){return {score, lines, level, playing, over, sound: data.sound, cell: CELL, lockTimer}} };
+               get state(){return {score, lines, level, playing, over, sound: data.sound, cell: CELL, lockTimer,
+                 combo, b2b, holdType, holdUsed, queue: queue.slice(0,5), toast: toast.text}},
+               spin: () => detectSpin(), rotate: d => tryRotate(d), hold: () => holdPiece() };
 
 // 자가 점검: 회전·충돌 로직이 깨지면 콘솔에 에러
 console.assert(JSON.stringify(rotCW([[1,0],[0,0]])) === '[[0,1],[0,0]]', '시계 회전 오류');
