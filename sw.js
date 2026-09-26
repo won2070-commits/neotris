@@ -1,5 +1,5 @@
 // NEOTRIS 오프라인 캐시 (cache-first)
-const CACHE = 'neotris-v5';   // 버전을 올리면 옛 캐시가 activate 때 전부 삭제됨
+const CACHE = 'neotris-v6';   // 버전을 올리면 옛 캐시가 activate 때 전부 삭제됨
 const ASSETS = ['./', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

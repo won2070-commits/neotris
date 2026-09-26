@@ -105,14 +105,13 @@
   #overlay button:hover { filter: brightness(1.1); }
   /* ── 휴대폰: 정보는 얇은 상단 바로, 나머지 전부를 보드에 ── */
   @media (max-width: 720px) {
-    #app { gap: 6px; padding: max(6px, env(safe-area-inset-top)) 6px max(6px, env(safe-area-inset-bottom)); }
-    #brand { align-self: center; gap: 7px; }
-    #brand img { width: 22px; height: 22px; }
-    #brand h1 { font-size: 14px; letter-spacing: .12em; }
-    #brand span { display: none; }
-    #wrap { flex-direction: column; gap: 6px; }
-    aside { order: -1; width: 100%; flex-direction: row; gap: 6px; align-items: stretch; }
-    aside .card { flex: 1; padding: 4px 7px; display: flex; align-items: center; }
+    /* 세로 공간이 곧 보드 크기다: 로고는 시작 화면에 있으니 빼고, 여백은 최소로.
+       하단 홈 인디케이터 영역은 보이는 영역이라 절반만 비운다. */
+    #app { gap: 4px; padding: max(4px, env(safe-area-inset-top)) 4px max(4px, calc(env(safe-area-inset-bottom) * .5)); }
+    #brand { display: none; }
+    #wrap { flex-direction: column; gap: 4px; }
+    aside { order: -1; width: 100%; flex-direction: row; gap: 4px; align-items: stretch; }
+    aside .card { flex: 1; padding: 2px 5px; display: flex; align-items: center; }
     aside .card h2 { display: none; }               /* 좁은 화면에선 라벨을 빼고 그 높이를 보드에 준다 */
     #stats { display: flex; gap: 9px; align-items: baseline; width: 100%; justify-content: space-around; }
     #stats > div { display: flex; gap: 3px; align-items: baseline; }
@@ -120,12 +119,11 @@
     .card:has(#next), .card:has(#hold) { flex: 0 0 auto; }
     .num { font-size: 14px; }
     #stats small { font-size: 9px; margin: 0; }
-    #tools { flex: 0 0 42px; flex-direction: column; gap: 4px; }
-    #tools button { padding: 0; font-size: 14px; }
+    #tools { flex: 0 0 auto; flex-direction: row; gap: 4px; }      /* 얇은 바에 세로로 못 쌓으니 가로로 */
+    #tools button { flex: none; width: 34px; padding: 0; font-size: 14px; }
     aside .card.keys { display: none; }   /* aside .card 규칙보다 우선하도록 특이성 확보 */
   }
   /* 세로가 짧은 화면(구형 폰)에선 로고를 빼고 그만큼 보드에 준다 */
-  @media (max-height: 660px) and (orientation: portrait) { #brand { display: none; } }
   /* 가로로 눕힌 폰: 정보 패널을 옆으로 돌려 세로 공간을 전부 보드에 준다 */
   @media (max-height: 520px) and (orientation: landscape) {
     #app { gap: 6px; }
@@ -192,7 +190,7 @@
 
 <script>
 'use strict';
-const APP_VER = 'v4.0 · 2026.08.12';   // 배포 확인용 — 업데이트 때마다 올린다
+const APP_VER = 'v4.1 · 2026.09.26';   // 배포 확인용 — 업데이트 때마다 올린다
 const COLS = 10, ROWS = 20;
 let CELL = 30;                                    // 화면 크기에 맞춰 매번 다시 계산
 const SHAPES = {
@@ -322,8 +320,8 @@ function sfx(kind) {
 // ── 화면 채우기: 남는 공간에 맞춰 칸 크기를 계산하고 고해상도로 그린다 ──
 function fitCanvas() {
   const box = $('stage').getBoundingClientRect();
-  const cell = Math.min((box.width - 6) / COLS, (box.height - 6) / ROWS);
-  CELL = Math.max(10, Math.min(Math.floor(cell), 46));
+  const cell = Math.min((box.width - 4) / COLS, (box.height - 4) / ROWS);
+  CELL = Math.max(10, Math.min(Math.floor(cell * 2) / 2, 46));   // 0.5px 단위 — 정수 반올림으로 최대 20px 버리던 것 회수
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
   boardCv.style.width = (COLS * CELL) + 'px';
   boardCv.style.height = (ROWS * CELL) + 'px';
@@ -343,7 +341,7 @@ function fitPanels(dpr) {
     cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   };
-  if (narrow) { size(holdCv, hctx, 32, 26); size(nextCv, nctx, 124, 26); }
+  if (narrow) { size(holdCv, hctx, 30, 24); size(nextCv, nctx, 118, 24); }
   else        { size(holdCv, hctx, 120, 52); size(nextCv, nctx, 120, 224); }
   drawNext(); drawHold();
 }
