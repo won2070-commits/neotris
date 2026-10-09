@@ -40,7 +40,15 @@
   }
   #brand span { display: block; margin-top: 4px; font-size: 9px; color: var(--dim); letter-spacing: .32em; }
   #wrap { display: flex; gap: 20px; align-items: stretch; flex: 1; min-height: 0; width: 100%; justify-content: center; }
-  #stage { flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  #stage { flex: 1; min-width: 0; min-height: 0; display: flex; align-items: center; justify-content: center; position: relative; }
+  /* 사이드 HUD: 보드가 높이에 묶여 양옆이 남는 휴대폰에서 홀드·다음을 그 여백에 세로로 넣는다.
+     absolute라 무대 크기 측정에 영향을 주지 않는다(보드 크기 계산이 순환하지 않도록). */
+  #side-l, #side-r { display: none; position: absolute; top: 50%; transform: translateY(-50%); width: 34px;
+                     flex-direction: column; align-items: center; gap: 4px; }
+  #side-l { left: 0; } #side-r { right: 0; }
+  .side-label { font-size: 8px; color: var(--dim); letter-spacing: .12em; }
+  body.side-hud #side-l, body.side-hud #side-r { display: flex; }
+  body.side-hud #hold-card, body.side-hud #next-card { display: none; }
   #boardbox { position: relative; }
   canvas#board {
     background: #0a0d1a; border: 2px solid var(--line); border-radius: 6px;
@@ -83,6 +91,8 @@
   #ov-log b { color: var(--text); }
   #ov-log:empty { display: none; }
   #ov-ver { font-size: 10px; color: var(--dim); opacity: .6; letter-spacing: .08em; }
+  #ov-hint { font-size: 11px; color: #4dd8e6; opacity: .85; line-height: 1.5; max-width: 86%; }
+  #ov-hint:empty { display: none; }
   /* 시작 화면 설정: 시작 레벨 · 소리 · 진동 (#overlay button 기본 스타일보다 우선하도록 특이성 확보) */
   #ov-set { display: flex; flex-direction: column; gap: 10px; width: min(280px, 86%); }
   .set-row { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--dim); }
@@ -145,6 +155,7 @@
 </header>
 <div id="wrap">
   <div id="stage">
+    <div id="side-l"><span class="side-label">홀드</span></div>
     <div id="boardbox">
       <canvas id="board"></canvas>
       <div id="overlay">
@@ -158,12 +169,14 @@
         </div>
         <button id="ov-btn">시작 (Enter)</button>
         <div id="ov-ver"></div>
+        <div id="ov-hint"></div>
       </div>
     </div>
+    <div id="side-r"><span class="side-label">다음</span></div>
   </div>
   <aside>
     <div class="card" id="hold-card" title="홀드 (C)"><h2>홀드</h2><canvas id="hold"></canvas></div>
-    <div class="card"><h2>다음</h2><canvas id="next"></canvas></div>
+    <div class="card" id="next-card"><h2>다음</h2><canvas id="next"></canvas></div>
     <div class="card"><h2>기록</h2>
       <div id="stats">
         <div><small>점수</small><div class="num" id="score">0</div></div>
@@ -190,7 +203,7 @@
 
 <script>
 'use strict';
-const APP_VER = 'v4.1 · 2026.09.26';   // 배포 확인용 — 업데이트 때마다 올린다
+const APP_VER = 'v4.2 · 2026.10.09';   // 배포 확인용 — 업데이트 때마다 올린다
 const COLS = 10, ROWS = 20;
 let CELL = 30;                                    // 화면 크기에 맞춰 매번 다시 계산
 const SHAPES = {
@@ -318,7 +331,26 @@ function sfx(kind) {
 }
 
 // ── 화면 채우기: 남는 공간에 맞춰 칸 크기를 계산하고 고해상도로 그린다 ──
+// 휴대폰 세로에서 보드가 '높이'에 묶이면 양옆이 비는데, 그 여백이 홀드·다음을 넣을 만큼(36px+) 넓을 때만
+// 사이드 HUD로 전환한다. 판단 근거는 #app 안쪽 크기뿐이라(모드에 따라 변하지 않음) 왕복 진동이 없다.
+let sideHud = false;
+function decideLayout() {
+  const narrow = matchMedia('(max-width: 720px)').matches && matchMedia('(orientation: portrait)').matches;
+  const app = $('app'), cs = getComputedStyle(app);
+  const avW = app.clientWidth  - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const avH = app.clientHeight - parseFloat(cs.paddingTop)  - parseFloat(cs.paddingBottom);
+  const cellH = (avH - 26 - 4 - 4) / ROWS;                 // 얇은 상단바(26) + 간격 + 테두리를 뺀 높이 기준 칸
+  const margin = (avW - cellH * COLS - 4) / 2;              // 그때 한쪽에 남는 여백
+  const want = narrow && margin >= 36;
+  if (want === sideHud) return;
+  sideHud = want;
+  document.body.classList.toggle('side-hud', sideHud);
+  (sideHud ? $('side-l') : $('hold-card')).appendChild(holdCv);   // 캔버스를 여백/상단바 사이로 옮긴다
+  (sideHud ? $('side-r') : $('next-card')).appendChild(nextCv);
+}
+
 function fitCanvas() {
+  decideLayout();
   const box = $('stage').getBoundingClientRect();
   const cell = Math.min((box.width - 4) / COLS, (box.height - 4) / ROWS);
   CELL = Math.max(10, Math.min(Math.floor(cell * 2) / 2, 46));   // 0.5px 단위 — 정수 반올림으로 최대 20px 버리던 것 회수
@@ -341,8 +373,9 @@ function fitPanels(dpr) {
     cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   };
-  if (narrow) { size(holdCv, hctx, 30, 24); size(nextCv, nctx, 118, 24); }
-  else        { size(holdCv, hctx, 120, 52); size(nextCv, nctx, 120, 224); }
+  if (sideHud)     { nextHoriz = false; size(holdCv, hctx, 30, 30); size(nextCv, nctx, 30, 150); }
+  else if (narrow) { size(holdCv, hctx, 30, 24); size(nextCv, nctx, 118, 24); }
+  else             { size(holdCv, hctx, 120, 52); size(nextCv, nctx, 120, 224); }
   drawNext(); drawHold();
 }
 
@@ -853,6 +886,7 @@ boardCv.addEventListener('pointerup', e => {
 boardCv.addEventListener('pointercancel', () => { g = null; });
 
 $('hold-card').addEventListener('click', holdPiece);
+$('side-l').addEventListener('click', holdPiece);              // 사이드 HUD의 홀드 칸을 눌러도 홀드
 $('btn-pause').addEventListener('click', togglePause);
 $('btn-sound').addEventListener('click', toggleSound);
 $('set-sound').addEventListener('click', toggleSound);
@@ -880,6 +914,16 @@ $('ov-btn').addEventListener('click', () => {
   startGame();
 });
 window.addEventListener('blur', () => { clearHeld(); if (playing) togglePause(); });
+// 주소창 있는 브라우저로 열었으면 세로가 짧아 보드가 작다 → 홈 화면 설치를 권한다(설치 후엔 사라짐)
+(() => {
+  const touch = matchMedia('(hover: none)').matches;
+  const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  if (!touch || standalone) return;
+  const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  $('ov-hint').textContent = ios
+    ? '📲 더 크게 보려면: 사파리 공유 버튼 → "홈 화면에 추가" (주소창 없이 전체 화면)'
+    : '📲 더 크게 보려면: 브라우저 메뉴 ⋮ → "홈 화면에 추가" (주소창 없이 전체 화면)';
+})();
 // 무대 크기가 바뀌면(글꼴 로딩·회전·주소창 숨김 등) 그때마다 다시 맞춘다.
 // 최초 1회만 계산하면 레이아웃이 확정되기 전 값이라 보드가 작게 잡힌다.
 if (window.ResizeObserver) new ResizeObserver(() => fitCanvas()).observe($('stage'));
